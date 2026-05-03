@@ -130,10 +130,10 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const resetToken = uuidv4();
     await supabase.from('profiles').update({ reset_token: resetToken }).eq('email', email);
 
-    const resetLink = `http://localhost:5173/?reset_token=${resetToken}&email=${encodeURIComponent(email)}`;
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?reset_token=${resetToken}&email=${encodeURIComponent(email)}`;
 
     const mailOptions = {
-      from: `"Student House Locator" <${process.env.SMTP_USER}>`,
+      from: `"DormPulse" <${process.env.SMTP_USER}>`,
       to: email,
       subject: 'DormPulse - Reset Your Password',
       html: `

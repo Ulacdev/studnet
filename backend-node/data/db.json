@@ -1,0 +1,29 @@
+{
+  "users": [
+    {
+      "id": "admin-id",
+      "full_name": "System Admin",
+      "email": "admin@dormpulse.com",
+      "password": "admin",
+      "role": "Admin",
+      "created_at": "2024-01-01T00:00:00Z"
+    },
+    {
+      "id": "941efa06-713e-4976-bd3f-fac5f36094ce",
+      "full_name": "dsad",
+      "email": "aganancaloy@gmail.com",
+      "password": "123",
+      "role": "Student",
+      "created_at": "2026-05-03T18:26:52.424Z"
+    },
+    {
+      "id": "c4517df1-7156-466f-aa57-cc991a55cbe6",
+      "full_name": "Fresh User",
+      "email": "fresh@test.com",
+      "password": "test123",
+      "role": "Student",
+      "created_at": "2026-05-03T18:29:35.412Z"
+    }
+  ],
+  "units": []
+}

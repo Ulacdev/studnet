@@ -1,0 +1,11 @@
+{
+  "name": "DormPulse - Student Housing Locator",
+  "description": "Find and track student dorms, apartments, and housing near your campus with real-time map integration.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "maps",
+    "geolocation"
+  ]
+}

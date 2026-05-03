@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-medical-primary: #6B8E61;
+  /* Sage Green */
+  --color-medical-secondary: #FDFCF8;
+  /* Cream White */
+  --color-medical-emergency: #C85C5C;
+  /* Muted Red */
+  --color-medical-surface: #F4F7F2;
+  /* Pale Sage */
+  --color-medical-border: #E2E8DD;
+  /* Light Sage Border */
+  --color-medical-accent: #A7C091;
+  /* Soft Sage */
+  --color-medical-text: #2D332A;
+  /* Dark Forest Green */
+
+  --color-dark-bg: #121412;
+  --color-dark-surface: #1E211E;
+  --color-dark-border: #2D332A;
+  --color-dark-text: #E2E8DD;
+}
+
+@layer base {
+  body {
+    @apply bg-medical-surface text-medical-text font-sans antialiased;
+  }
+}
+
+.natural-shadow {
+  box-shadow: 0 10px 25px -5px rgba(45, 51, 42, 0.08);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Leaflet Overrides */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* Dark Mode Leaflet Popups */
+.dark-popup .leaflet-popup-content-wrapper,
+.dark-popup .leaflet-popup-tip {
+  background-color: var(--color-dark-surface) !important;
+  color: var(--color-dark-text) !important;
+  border: 1px solid var(--color-dark-border);
+}
+
+.medical-marker {
+  @apply flex items-center justify-center rounded-full border-2 border-white shadow-lg text-white;
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.hospital-marker {
+  @apply bg-medical-primary;
+}
+
+.pharmacy-marker {
+  @apply bg-medical-accent;
+}
+
+.emergency-marker {
+  @apply bg-medical-emergency;
+}
+
+.dental-marker {
+  @apply bg-medical-primary opacity-80;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-medical-border/20 rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-medical-accent/60 rounded-full hover:bg-medical-accent transition-colors;
+}

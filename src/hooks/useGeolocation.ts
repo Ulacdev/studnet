@@ -60,12 +60,29 @@ export function useGeolocation() {
 
     const options: PositionOptions = {
       enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0,
+      timeout: 15000,      // Increased to 15s for better cold-start locks
+      maximumAge: 5000,    // Allow 5s old cached positions for faster initial response
     };
 
+    console.log('📡 Requesting GPS Lock (High Accuracy)...');
+
     // One-shot for immediate result
-    navigator.geolocation.getCurrentPosition(updateLocation, handleError, options);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        console.log('✅ Initial GPS Lock acquired');
+        updateLocation(pos);
+      }, 
+      (err) => {
+        console.warn('⚠️ High Accuracy failed, trying standard accuracy...', err.message);
+        // Fallback to low accuracy if high accuracy fails
+        navigator.geolocation.getCurrentPosition(updateLocation, handleError, {
+          ...options,
+          enableHighAccuracy: false,
+          timeout: 10000
+        });
+      }, 
+      options
+    );
 
     // Continuous watch for updates
     watchIdRef.current = navigator.geolocation.watchPosition(updateLocation, handleError, options);

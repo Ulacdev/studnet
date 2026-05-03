@@ -39,22 +39,25 @@ export default function App() {
   // Track the timestamp of the last manual refresh request
   const [lastRefreshRequest, setLastRefreshRequest] = useState(0);
 
-  // Sync raw location to active location if not manual
+  // Sync raw location to active location
   useEffect(() => {
-    if (rawLocation && !isManualLocation && hasInteracted) {
-      setActiveLocation(rawLocation);
+    if (rawLocation && !isManualLocation) {
+      // If we don't have an active location yet, or if the user has interacted, sync it
+      if (!activeLocation || hasInteracted) {
+        setActiveLocation(rawLocation);
+      }
       
-      // If we have a pending refresh request and this location is fresh (newer than the request)
+      // If we have a pending refresh request and this location is fresh
       if (lastRefreshRequest > 0 && rawLocation.timestamp && rawLocation.timestamp >= lastRefreshRequest) {
-        setLastRefreshRequest(0); // Reset request
+        setLastRefreshRequest(0);
         loadData(rawLocation);
       }
     }
-  }, [rawLocation, isManualLocation, hasInteracted, lastRefreshRequest]);
+  }, [rawLocation, isManualLocation, hasInteracted, lastRefreshRequest, activeLocation]);
 
   // Reverse Geocoding to show Municipality/Address in Search Bar
   useEffect(() => {
-    if (activeLocation && !isManualLocation && hasInteracted) {
+    if (activeLocation && !isManualLocation) {
       const reverseGeocode = async () => {
         try {
           const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${activeLocation.lat}&lon=${activeLocation.lon}`);
@@ -71,7 +74,7 @@ export default function App() {
       };
       reverseGeocode();
     }
-  }, [activeLocation, isManualLocation, hasInteracted]);
+  }, [activeLocation, isManualLocation]);
 
   const [selectedFacility, setSelectedFacility] = useState<DormFacility | null>(null);
   const [activeTab, setActiveTab] = useState<'map' | 'list'>('list');
@@ -118,9 +121,20 @@ export default function App() {
     }
   }, []);
 
-  // Fetch facilities when location changes
+  // Fetch facilities when location changes - Hyper Fast Mode
   useEffect(() => {
-    if (activeLocation && hasInteracted) {
+    if (activeLocation) {
+      // 1. Check Session Cache to prevent redundant fetches
+      const cacheKey = `housing_${activeLocation.lat.toFixed(3)}_${activeLocation.lon.toFixed(3)}`;
+      const cachedData = sessionStorage.getItem(cacheKey);
+      
+      if (cachedData) {
+        console.log('⚡ Hyper-Fast: Loading from session cache');
+        setFacilities(JSON.parse(cachedData));
+        setLastFetchLocation(activeLocation);
+        return;
+      }
+
       if (!lastFetchLocation) {
         loadData(activeLocation);
       } else {
@@ -130,13 +144,13 @@ export default function App() {
           lastFetchLocation.lat,
           lastFetchLocation.lon
         );
-        // Refresh if moved more than 200 meters for a more real-time feel
-        if (distanceMoved > 0.2) {
+        // Refresh if moved more than 250 meters
+        if (distanceMoved > 0.25) {
           loadData(activeLocation);
         }
       }
     }
-  }, [activeLocation, lastFetchLocation, hasInteracted]);
+  }, [activeLocation, lastFetchLocation]);
 
   // Handle geolocation errors to stop loading states
   useEffect(() => {
@@ -222,32 +236,35 @@ export default function App() {
     setIsLoading(true);
     setLastFetchLocation(loc);
     
-    // 1. Trigger Admin Units Refresh (handled via useEffect dependencies, but we ensure it's fresh)
-    // 2. Fetch Global Housing (OSM) - Default 30km
+    // 1. Instant Phase: Stop the main "Loading" spinner immediately.
+    // The Admin units (already loading via another useEffect) will show up now.
+    setIsLoading(false);
+
+    // 2. Background Phase: Fetch Global Housing (OSM)
     setIsGlobalLoading(true);
-    fetchNearbyHousing(loc, 30000).then(osmData => {
-      setIsGlobalLoading(false);
-      setIsLoading(false);
+    fetchNearbyHousing(loc, 10000).then(osmData => {
       if (!osmData || osmData.length === 0) {
-          console.log('🌍 Global: No units found in radius.');
-          if (facilities.length === 0 && adminDorms.length === 0) setError("No housing found in this 30km area.");
+          console.log('🌍 Global: No units found in 10km radius.');
+          setIsGlobalLoading(false);
           return;
       }
-      console.log(`🌍 Global: Found ${osmData.length} housing units.`);
-
+      
       const osmWithDist = osmData.map(d => ({
         ...d,
         distance: calculateDistance(loc.lat, loc.lon, d.lat, d.lon)
       }));
 
       setFacilities(osmWithDist);
-      // Clear any previous error when we successfully find housing
-      if (osmWithDist.length > 0) setError(null);
-    }).catch(err => {
-      console.warn("Global housing fetch failed or timed out.");
+      
+      // Cache the result for this specific area (1km precision)
+      const cacheKey = `housing_${loc.lat.toFixed(3)}_${loc.lon.toFixed(3)}`;
+      sessionStorage.setItem(cacheKey, JSON.stringify(osmWithDist));
+      
       setIsGlobalLoading(false);
-      setIsLoading(false);
-      if (facilities.length === 0 && adminDorms.length === 0) setError("Unable to load housing data. Please try again.");
+      setError(null);
+    }).catch(err => {
+      console.warn("Global housing fetch failed.");
+      setIsGlobalLoading(false);
     });
   };
 
@@ -271,7 +288,13 @@ export default function App() {
       const matchSearch = f.name.toLowerCase().includes(query) ||
         f.category.toLowerCase().includes(query) ||
         f.address.toLowerCase().includes(query);
-      return matchSearch;
+      
+      // Proximity Filter: If no active search, only show units within 5km
+      // If there IS a search query, show everything matching the query (even if far)
+      const isNearby = (f.distance || 0) <= 5;
+      const shouldShow = searchQuery ? matchSearch : (matchSearch && isNearby);
+
+      return shouldShow;
     });
   }, [allFacilities, searchQuery]);
 
@@ -419,9 +442,23 @@ export default function App() {
     )}>
       {/* Non-blocking GPS Sync Bar */}
       {geoLoading && !activeLocation && (
-        <div className="bg-medical-primary text-white text-[10px] font-black uppercase tracking-[0.2em] py-2 flex items-center justify-center gap-3 animate-pulse z-[2000]">
-          <LocateFixed size={12} />
-          Establishing GPS Connection...
+        <div className="bg-medical-primary text-white text-[10px] font-black uppercase tracking-[0.2em] py-2 flex items-center justify-center gap-4 animate-pulse z-[2000]">
+          <div className="flex items-center gap-2">
+            <LocateFixed size={12} className="animate-spin" />
+            Establishing GPS Connection...
+          </div>
+          <button 
+            onClick={() => {
+              // Fallback to Manila for testing/demonstration if GPS is stuck
+              const manila = { lat: 14.5995, lon: 120.9842, accuracy: 0, timestamp: Date.now() };
+              setActiveLocation(manila);
+              setHasInteracted(true);
+              loadData(manila);
+            }}
+            className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded-full border border-white/20 transition-all lowercase italic"
+          >
+            (Stuck? Use Default)
+          </button>
         </div>
       )}
       <AuthScreen
@@ -800,14 +837,129 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Natural Scroll Content Area - StartupLab Style Categories */}
+              {/* Featured Units Section - Moved Up */}
+              <div className="px-6 sm:px-12 lg:px-20 mb-10 mt-16">
+                <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6 pb-4 border-b border-medical-border dark:border-dark-border">
+                  <div className="space-y-2">
+                    <div className="flex flex-col gap-1">
+                      <h2 className={cn(
+                        "text-2xl lg:text-3xl font-black tracking-tight flex items-center gap-2 flex-wrap",
+                        isDarkMode ? "text-white" : "text-medical-text"
+                      )}>
+                        Browsing units in 
+                        <div className="relative inline-block ml-2">
+                          <button 
+                            onClick={() => setIsLocationMenuOpen(!isLocationMenuOpen)}
+                            className="text-medical-primary flex items-center gap-2 cursor-pointer hover:opacity-80 transition-all outline-none"
+                          >
+                            {activeLocation ? (locationName || searchQuery || (isLoading ? "Locating..." : "Your Location")) : "Your Location"}
+                            <ChevronRight className={cn("transition-transform", isLocationMenuOpen ? "rotate-90" : "")} size={20} />
+                          </button>
+
+                          <AnimatePresence>
+                            {isLocationMenuOpen && (
+                              <>
+                                <div className="fixed inset-0 z-[1001]" onClick={() => setIsLocationMenuOpen(false)} />
+                                <motion.div
+                                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                  className={cn(
+                                    "absolute left-0 mt-2 w-72 rounded-3xl natural-shadow z-[1002] overflow-hidden border p-2",
+                                    isDarkMode ? "bg-dark-surface border-dark-border" : "bg-white border-medical-border"
+                                  )}
+                                >
+                                  <button
+                                    onClick={() => {
+                                      setIsLocationMenuOpen(false);
+                                      handleQuickLocation();
+                                    }}
+                                    className={cn(
+                                      "w-full flex items-center gap-3 p-4 rounded-2xl transition-all",
+                                      isDarkMode ? "hover:bg-white/5" : "hover:bg-medical-surface"
+                                    )}
+                                  >
+                                    <div className="w-10 h-10 rounded-full bg-medical-primary/10 flex items-center justify-center text-medical-primary">
+                                      <LocateFixed size={20} />
+                                    </div>
+                                    <div className="text-left">
+                                      <p className="text-sm font-black">Use my current location</p>
+                                      <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Find nearby housing</p>
+                                    </div>
+                                  </button>
+                                </motion.div>
+                              </>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </h2>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2">
+                    {isLoading ? (
+                      <div className="w-3 h-3 rounded-full border-2 border-slate-200 border-t-medical-primary animate-spin" />
+                    ) : (
+                      <div className="w-3 h-3 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      </div>
+                    )}
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                      {isLoading ? 'Updating housing list...' : 'Housing list up to date'}
+                    </span>
+                  </div>
+
+                  <div id="featured-section">
+                    <h3 className={cn(
+                      "text-2xl lg:text-3xl font-black tracking-tight mb-2",
+                      isDarkMode ? "text-white" : "text-medical-text"
+                    )}>
+                      {adminDorms.length > 0 ? "Verified Premium Units" : "Global Trending Units"}
+                    </h3>
+                    <p className="text-slate-500 font-medium text-sm lg:text-base max-w-2xl mb-8">
+                      {adminDorms.length > 0 
+                        ? "Hand-picked, verified student housing units from our trusted partners."
+                        : "The most liked and anticipated housing units happening now world-wide."}
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {featuredUnits.slice(0, 6).map((facility) => (
+                        <motion.div
+                          key={facility.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          whileInView={{ opacity: 1, y: 0 }}
+                          viewport={{ once: true }}
+                        >
+                          <FacilityCard
+                            facility={facility}
+                            onClick={() => {
+                              setSelectedFacility(facility);
+                              setIsHome(false);
+                              setActiveTab('map');
+                            }}
+                            isDarkMode={isDarkMode}
+                            isSaved={savedFacilities.some(sf => sf.id === facility.id)}
+                            onDirections={handleDirections}
+                            onToggleSave={handleToggleSave}
+                            t={t}
+                          />
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Natural Scroll Content Area - Smart Categories - Moved Down */}
               <div className="w-full py-8">
                 <div className={cn(
                   "border-y border-medical-primary/5 px-6 sm:px-12 lg:px-20 py-16 transition-colors",
                   isDarkMode ? "" : ""
                 )}>
                   <h3 className={`text-[10px] font-black uppercase tracking-widest mb-8 transition-colors ${isDarkMode ? 'text-white/40' : 'text-medical-text/40'}`}>
-                    Housing smart categories
+                    Explore by Category
                   </h3>
                   
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6">
@@ -849,121 +1001,7 @@ export default function App() {
                   </div>
                 </div>
 
-
-          {/* Browse Section Inspiration */}
-          <div className="px-6 sm:px-12 lg:px-20 mb-10 mt-24">
-            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6 pb-4 border-b border-medical-border dark:border-dark-border">
-              <div className="space-y-2">
-                <div className="flex flex-col gap-1">
-                  <h2 className={cn(
-                    "text-2xl lg:text-3xl font-black tracking-tight flex items-center gap-2 flex-wrap",
-                    isDarkMode ? "text-white" : "text-medical-text"
-                  )}>
-                    Browsing units in 
-                    <div className="relative inline-block ml-2">
-                      <button 
-                        onClick={() => setIsLocationMenuOpen(!isLocationMenuOpen)}
-                        className="text-medical-primary flex items-center gap-2 cursor-pointer hover:opacity-80 transition-all outline-none"
-                      >
-                        {hasInteracted ? (locationName || searchQuery || (isLoading ? "Locating..." : "Your Location")) : "Your Location"}
-                        <ChevronRight className={cn("transition-transform", isLocationMenuOpen ? "rotate-90" : "")} size={20} />
-                      </button>
-
-                      <AnimatePresence>
-                        {isLocationMenuOpen && (
-                          <>
-                            <div className="fixed inset-0 z-[1001]" onClick={() => setIsLocationMenuOpen(false)} />
-                            <motion.div
-                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                              className={cn(
-                                "absolute left-0 mt-2 w-72 rounded-3xl natural-shadow z-[1002] overflow-hidden border p-2",
-                                isDarkMode ? "bg-dark-surface border-dark-border" : "bg-white border-medical-border"
-                              )}
-                            >
-                              <button
-                                onClick={() => {
-                                  setIsLocationMenuOpen(false);
-                                  handleQuickLocation();
-                                }}
-                                className={cn(
-                                  "w-full flex items-center gap-3 p-4 rounded-2xl transition-all",
-                                  isDarkMode ? "hover:bg-white/5" : "hover:bg-medical-surface"
-                                )}
-                              >
-                                <div className="w-10 h-10 rounded-full bg-medical-primary/10 flex items-center justify-center text-medical-primary">
-                                  <LocateFixed size={20} />
-                                </div>
-                                <div className="text-left">
-                                  <p className="text-sm font-black">Use my current location</p>
-                                  <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">Find nearby housing</p>
-                                </div>
-                              </button>
-                            </motion.div>
-                          </>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </h2>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
-                {isLoading ? (
-                  <div className="w-3 h-3 rounded-full border-2 border-slate-200 border-t-medical-primary animate-spin" />
-                ) : (
-                  <div className="w-3 h-3 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  </div>
-                )}
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                  {isLoading ? 'Updating housing list...' : 'Housing list up to date'}
-                </span>
-              </div>
-
-              <div id="featured-section">
-                <h3 className={cn(
-                  "text-2xl lg:text-3xl font-black tracking-tight mb-2",
-                  isDarkMode ? "text-white" : "text-medical-text"
-                )}>
-                  {adminDorms.length > 0 ? "Verified Premium Units" : "Global Trending Units"}
-                </h3>
-                <p className="text-slate-500 font-medium text-sm lg:text-base max-w-2xl mb-8">
-                  {adminDorms.length > 0 
-                    ? "Hand-picked, verified student housing units from our trusted partners."
-                    : "The most liked and anticipated housing units happening now world-wide."}
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {featuredUnits.slice(0, 6).map((facility) => (
-                    <motion.div
-                      key={facility.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true }}
-                    >
-                      <FacilityCard
-                        facility={facility}
-                        onClick={() => {
-                          setSelectedFacility(facility);
-                          setIsHome(false);
-                          setActiveTab('map');
-                        }}
-                        isDarkMode={isDarkMode}
-                        isSaved={savedFacilities.some(sf => sf.id === facility.id)}
-                        onDirections={handleDirections}
-                        onToggleSave={handleToggleSave}
-                        t={t}
-                      />
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>                {/* Comprehensive Professional Footer */}
+                {/* Comprehensive Professional Footer */}
                 <footer className={cn(
                   "mt-24 pt-20 pb-12 transition-colors w-full bg-medical-primary text-white border-t border-white/10"
                 )}>

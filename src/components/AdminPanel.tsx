@@ -64,15 +64,11 @@ interface AdminPanelProps {
   currentUser: any;
 }
 
-const DASHBOARD_DATA = [
-  { name: 'Mon', logins: 45, searches: 120 },
-  { name: 'Tue', logins: 52, searches: 150 },
-  { name: 'Wed', logins: 48, searches: 180 },
-  { name: 'Thu', logins: 61, searches: 210 },
-  { name: 'Fri', logins: 55, searches: 190 },
-  { name: 'Sat', logins: 67, searches: 240 },
-  { name: 'Sun', logins: 72, searches: 280 },
-];
+// Helper to format timestamps for the graph
+const formatChartDate = (dateStr: string) => {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', { weekday: 'short' });
+};
 
 export default function AdminPanel({ 
   onClose, 
@@ -167,9 +163,31 @@ export default function AdminPanel({
     }
   };
 
+  // Real-time polling: Refresh every 10 seconds
   useEffect(() => {
     loadAllAdminData();
-  }, [activeTab]);
+    const interval = setInterval(loadAllAdminData, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Process audit logs for the graph
+  const chartData = React.useMemo(() => {
+    const last7Days = [...Array(7)].map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      return d.toISOString().split('T')[0];
+    }).reverse();
+
+    return last7Days.map(date => {
+      const dayLogs = auditLogs.filter(log => log.created_at.startsWith(date));
+      return {
+        name: formatChartDate(date),
+        logins: dayLogs.filter(l => l.action.includes('LOGIN')).length,
+        actions: dayLogs.length,
+        units: dayLogs.filter(l => l.action.includes('UNIT')).length
+      };
+    });
+  }, [auditLogs]);
 
   const handleAddressSearch = async () => {
     if (!newDorm.address) return;
@@ -541,11 +559,15 @@ export default function AdminPanel({
                     </div>
                     <div className="h-[400px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={DASHBOARD_DATA}>
+                        <AreaChart data={chartData}>
                           <defs>
                             <linearGradient id="colorLogins" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#4FB9AF" stopOpacity={0.3}/>
                               <stop offset="95%" stopColor="#4FB9AF" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorActions" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#ffffff10' : '#00000010'} />
@@ -553,36 +575,38 @@ export default function AdminPanel({
                             dataKey="name" 
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fontSize: 12, fontWeight: 700, fill: isDarkMode ? '#ffffff40' : '#00000040' }}
+                            tick={{ fontSize: 10, fontWeight: 700, fill: isDarkMode ? '#ffffff40' : '#00000040' }}
                           />
                           <YAxis 
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fontSize: 12, fontWeight: 700, fill: isDarkMode ? '#ffffff40' : '#00000040' }}
+                            tick={{ fontSize: 10, fontWeight: 700, fill: isDarkMode ? '#ffffff40' : '#00000040' }}
                           />
                           <Tooltip 
                             contentStyle={{ 
-                              borderRadius: '24px', 
+                              borderRadius: '16px', 
                               border: 'none', 
-                              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                              boxShadow: '0 20px 40px -10px rgba(0,0,0,0.2)',
                               backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
-                              color: isDarkMode ? '#fff' : '#000'
                             }} 
                           />
                           <Area 
                             type="monotone" 
-                            dataKey="logins" 
-                            stroke="#4FB9AF" 
-                            strokeWidth={4}
+                            dataKey="actions" 
+                            name="Total Activity"
+                            stroke="#6366f1" 
+                            strokeWidth={3}
                             fillOpacity={1} 
-                            fill="url(#colorLogins)" 
+                            fill="url(#colorActions)" 
                           />
                           <Area 
                             type="monotone" 
-                            dataKey="searches" 
-                            stroke="#6366f1" 
-                            strokeWidth={4}
-                            fillOpacity={0}
+                            dataKey="logins" 
+                            name="Logins"
+                            stroke="#4FB9AF" 
+                            strokeWidth={3}
+                            fillOpacity={1} 
+                            fill="url(#colorLogins)" 
                           />
                         </AreaChart>
                       </ResponsiveContainer>
@@ -592,21 +616,25 @@ export default function AdminPanel({
                   <div className={`p-10 rounded-2xl border ${isDarkMode ? 'bg-dark-surface border-white/10' : 'bg-white border-medical-border shadow-sm'}`}>
                     <h3 className="text-xl font-black mb-8">System Activity</h3>
                     <div className="space-y-6">
-                      {[
-                        { title: 'New Unit Registration', desc: 'Private Student Hall added', time: '4m ago', status: 'success' },
-                        { title: 'User Backup', desc: 'Automated DB backup completed', time: '12m ago', status: 'info' },
-                        { title: 'Traffic Spike', desc: '240 new visitors in last hour', time: '1h ago', status: 'warning' },
-                        { title: 'System Patch', desc: 'Security protocols updated', time: '3h ago', status: 'success' },
-                      ].map((item, i) => (
+                      {auditLogs.slice(0, 5).map((log, i) => (
                         <div key={i} className="flex gap-4 group">
-                          <div className={`w-1.5 h-12 rounded-full flex-shrink-0 ${item.status === 'success' ? 'bg-green-500' : item.status === 'warning' ? 'bg-orange-500' : 'bg-blue-500'}`} />
+                          <div className={`w-1.5 h-12 rounded-full flex-shrink-0 ${
+                            log.action.includes('CREATED') ? 'bg-green-500' : 
+                            log.action.includes('DELETED') ? 'bg-rose-500' : 
+                            log.action.includes('LOGIN') ? 'bg-blue-500' : 'bg-orange-500'
+                          }`} />
                           <div className="flex-1">
-                            <h4 className="text-sm font-black tracking-tight">{item.title}</h4>
-                            <p className="text-xs opacity-50 font-bold">{item.desc}</p>
-                            <span className="text-[10px] uppercase font-black tracking-widest opacity-30 mt-1 block">{item.time}</span>
+                            <h4 className="text-sm font-black tracking-tight">{log.action.replace('_', ' ')}</h4>
+                            <p className="text-xs opacity-50 font-bold truncate max-w-[200px]">{log.details || log.user_email}</p>
+                            <span className="text-[10px] uppercase font-black tracking-widest opacity-30 mt-1 block">
+                              {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
                         </div>
                       ))}
+                      {auditLogs.length === 0 && (
+                        <p className="text-sm opacity-30 font-bold text-center py-10">No recent activity detected.</p>
+                      )}
                     </div>
                     <button className={`w-full mt-10 p-5 rounded-lg border font-black text-sm hover:scale-[1.02] active:scale-[0.98] transition-all ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-medical-surface border-medical-border'}`}>
                       View Full Logs
